@@ -1,0 +1,20 @@
+server:
+  port: 9000
+
+zuul:
+  routes:
+    service-feign:    #自定义的 路由名称
+      path: /api-feign/**   #路由路径
+      serviceId: service-feign #VIP 模式中的 serviceId
+
+spring:
+  application:
+    name: zuul-gateway-service
+  cloud:
+    consul:
+      host: localhost
+      port: 8761
+      enabled: true
+      discovery:
+        enabled: true
+        prefer-ip-address: true
