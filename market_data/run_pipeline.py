@@ -28,17 +28,20 @@ def safe(call, label):
 def main():
     summaries, comparisons = [], []
     for symbol, cfg in A_SHARES.items():
-        em = safe(lambda: fetch_eastmoney_5m(cfg["secid"], START_DATE, END_DATE), f"eastmoney {symbol}")
+        # Cloud runners can be blocked by individual market-data vendors.
+        # Each source is independent; a blocked source must never abort the pipeline.
         sn = safe(lambda: fetch_sina_5m(cfg["sina"], 2400), f"sina {symbol}")
+        em = safe(lambda: fetch_eastmoney_5m(cfg["secid"], START_DATE, END_DATE), f"eastmoney {symbol}")
         yh = safe(lambda: fetch_yahoo_5m(cfg["yahoo"], START_DATE, END_DATE), f"yahoo-cn {symbol}")
-        for x in (sn, yh):
+        for x in (sn, yh, em):
             if not x.empty:
                 x["ts"] = pd.to_datetime(x.ts)
         if not sn.empty:
             sn = sn[(sn.ts >= pd.Timestamp(START_DATE)) & (sn.ts < pd.Timestamp(END_DATE) + pd.Timedelta(days=1))]
-            # Sina has volume but no turnover amount. Use close*volume only as a within-symbol efficiency proxy.
             if "amount" not in sn.columns or sn["amount"].isna().all():
                 sn["amount"] = sn["close"] * sn["volume"]
+        if not em.empty:
+            em = em[(em.ts >= pd.Timestamp(START_DATE)) & (em.ts < pd.Timestamp(END_DATE) + pd.Timedelta(days=1))]
         if not yh.empty:
             if getattr(yh.ts.dt, "tz", None) is not None:
                 yh["ts"] = yh.ts.dt.tz_convert("Asia/Shanghai").dt.tz_localize(None)
