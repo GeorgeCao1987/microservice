@@ -13,10 +13,14 @@ on:
       - '.github/workflows/market-data-v13.yml'
   workflow_dispatch:
 
+concurrency:
+  group: market-data-v13-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backfill-validate-backtest:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
