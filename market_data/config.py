@@ -1,5 +1,7 @@
-START_DATE = "2026-07-01"
-END_DATE = "2026-08-31"
+import os
+
+START_DATE = os.getenv("MARKET_START_DATE", "2026-07-01")
+END_DATE = os.getenv("MARKET_END_DATE", "2026-08-31")
 TZ = "Asia/Shanghai"
 
 A_SHARES = {
