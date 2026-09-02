@@ -3,7 +3,10 @@ import time
 import pandas as pd
 
 from config import A_SHARES, START_DATE, END_DATE, OVERSEAS
-from collectors import fetch_mootdx_5m, fetch_sina_5m, fetch_yahoo_recent_5m, fetch_yahoo_daily
+from collectors import (
+    fetch_baostock_5m, fetch_mootdx_5m, fetch_sina_5m,
+    fetch_yahoo_recent_5m, fetch_yahoo_daily,
+)
 from validate import validate_a_share, compare_sources
 
 BASE = Path(__file__).resolve().parent
@@ -35,42 +38,87 @@ def safe(call, label, attempts=1, require_nonempty=False):
     return pd.DataFrame()
 
 
+def trim(x):
+    if x is None or x.empty:
+        return pd.DataFrame()
+    x = x.copy()
+    x["ts"] = pd.to_datetime(x.ts)
+    return x[
+        (x.ts >= pd.Timestamp(START_DATE)) &
+        (x.ts < pd.Timestamp(END_DATE) + pd.Timedelta(days=1))
+    ].copy()
+
+
+def complete_enough(x, symbol):
+    if x is None or x.empty:
+        return False
+    _, sm = validate_a_share(x, symbol)
+    r = sm.iloc[0]
+    return bool(
+        float(r["completeness"]) >= .999 and
+        int(r["missing_days"]) == 0 and
+        int(r["incomplete_days"]) == 0
+    )
+
+
 def main():
     summaries = []
     comparisons = []
+
     for symbol, cfg in A_SHARES.items():
-        td = safe(
-            lambda: fetch_mootdx_5m(
-                cfg["sina"], START_DATE, END_DATE,
-                is_index=(symbol == "000001.SH")
-            ),
-            f"mootdx {symbol}", attempts=3, require_nonempty=True,
-        )
-        sn = safe(lambda: fetch_sina_5m(cfg["sina"], 1023), f"sina {symbol}")
-        for x in (td, sn):
-            if not x.empty:
-                x["ts"] = pd.to_datetime(x.ts)
-                x.drop(
-                    x[(x.ts < pd.Timestamp(START_DATE)) |
-                      (x.ts >= pd.Timestamp(END_DATE) + pd.Timedelta(days=1))].index,
-                    inplace=True,
-                )
+        # Historical backtest source: Baostock first. It does not depend on a
+        # TDX quote node and is suitable for older 5m windows.
+        bs = trim(safe(
+            lambda: fetch_baostock_5m(cfg["sina"], START_DATE, END_DATE),
+            f"baostock {symbol}", attempts=2, require_nonempty=True,
+        ))
+
+        # Only fall back to mootdx when Baostock is not sufficiently complete.
+        td = pd.DataFrame()
+        if not complete_enough(bs, symbol):
+            td = trim(safe(
+                lambda: fetch_mootdx_5m(
+                    cfg["sina"], START_DATE, END_DATE,
+                    is_index=(symbol == "000001.SH")
+                ),
+                f"mootdx {symbol}", attempts=2, require_nonempty=True,
+            ))
+
+        # Sina remains a recent-history cross-check, not a historical backtest fallback.
+        sn = trim(safe(lambda: fetch_sina_5m(cfg["sina"], 1023), f"sina {symbol}"))
         if not sn.empty and ("amount" not in sn.columns or sn.amount.isna().all()):
             sn["amount"] = sn.close * sn.volume
 
+        save(bs.assign(symbol=symbol), DATA / f"a_{symbol.replace('.', '_')}_baostock.csv")
         save(td.assign(symbol=symbol), DATA / f"a_{symbol.replace('.', '_')}_mootdx.csv")
         save(sn.assign(symbol=symbol), DATA / f"a_{symbol.replace('.', '_')}_sina.csv")
-        primary = td if not td.empty else sn
-        source = "mootdx" if not td.empty else "sina"
+
+        if complete_enough(bs, symbol):
+            primary, source = bs, "baostock"
+        elif complete_enough(td, symbol):
+            primary, source = td, "mootdx"
+        elif not bs.empty:
+            primary, source = bs, "baostock"
+        elif not td.empty:
+            primary, source = td, "mootdx"
+        else:
+            primary, source = sn, "sina"
+
         daily, summary = validate_a_share(primary, symbol)
         if not summary.empty:
             summary["primary_source"] = source
         save(daily, RESULTS / f"daily_{symbol.replace('.', '_')}.csv")
         summaries.append(summary)
-        if not td.empty and not sn.empty:
-            c = compare_sources(td, sn, symbol)
-            c["pair"] = "mootdx-sina"
-            comparisons.append(c)
+
+        for a, b, pair in [
+            (bs, td, "baostock-mootdx"),
+            (bs, sn, "baostock-sina"),
+            (td, sn, "mootdx-sina"),
+        ]:
+            if not a.empty and not b.empty:
+                c = compare_sources(a, b, symbol)
+                c["pair"] = pair
+                comparisons.append(c)
 
     for ticker, name in OVERSEAS.items():
         x = safe(
