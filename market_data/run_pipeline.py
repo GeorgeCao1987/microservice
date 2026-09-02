@@ -2,7 +2,7 @@ from pathlib import Path
 import pandas as pd
 
 from config import A_SHARES, START_DATE, END_DATE, OVERSEAS
-from collectors import fetch_eastmoney_5m, fetch_sina_5m, fetch_yahoo_5m
+from collectors import fetch_baostock_5m, fetch_eastmoney_5m, fetch_sina_5m, fetch_yahoo_recent_5m
 from validate import validate_a_share, compare_sources
 
 BASE = Path(__file__).resolve().parent
@@ -28,20 +28,18 @@ def safe(call, label):
 def main():
     summaries, comparisons = [], []
     for symbol, cfg in A_SHARES.items():
-        # Cloud runners can be blocked by individual market-data vendors.
-        # Each source is independent; a blocked source must never abort the pipeline.
-        sn = safe(lambda: fetch_sina_5m(cfg["sina"], 2400), f"sina {symbol}")
+        bs = safe(lambda: fetch_baostock_5m(cfg["sina"], START_DATE, END_DATE), f"baostock {symbol}")
+        sn = safe(lambda: fetch_sina_5m(cfg["sina"], 1023), f"sina {symbol}")
         em = safe(lambda: fetch_eastmoney_5m(cfg["secid"], START_DATE, END_DATE), f"eastmoney {symbol}")
-        yh = safe(lambda: fetch_yahoo_5m(cfg["yahoo"], START_DATE, END_DATE), f"yahoo-cn {symbol}")
-        for x in (sn, yh, em):
+        yh = safe(lambda: fetch_yahoo_recent_5m(cfg["yahoo"], START_DATE, END_DATE), f"yahoo-cn {symbol}")
+        for x in (bs, sn, yh, em):
             if not x.empty:
                 x["ts"] = pd.to_datetime(x.ts)
-        if not sn.empty:
-            sn = sn[(sn.ts >= pd.Timestamp(START_DATE)) & (sn.ts < pd.Timestamp(END_DATE) + pd.Timedelta(days=1))]
-            if "amount" not in sn.columns or sn["amount"].isna().all():
-                sn["amount"] = sn["close"] * sn["volume"]
-        if not em.empty:
-            em = em[(em.ts >= pd.Timestamp(START_DATE)) & (em.ts < pd.Timestamp(END_DATE) + pd.Timedelta(days=1))]
+        for x in (bs, sn, em):
+            if not x.empty:
+                x.drop(x[(x.ts < pd.Timestamp(START_DATE)) | (x.ts >= pd.Timestamp(END_DATE) + pd.Timedelta(days=1))].index, inplace=True)
+        if not sn.empty and ("amount" not in sn.columns or sn["amount"].isna().all()):
+            sn["amount"] = sn["close"] * sn["volume"]
         if not yh.empty:
             if getattr(yh.ts.dt, "tz", None) is not None:
                 yh["ts"] = yh.ts.dt.tz_convert("Asia/Shanghai").dt.tz_localize(None)
@@ -49,23 +47,25 @@ def main():
             if "amount" not in yh.columns or yh["amount"].isna().all():
                 yh["amount"] = yh["close"] * yh["volume"]
 
+        save(bs.assign(symbol=symbol), DATA / f"a_{symbol.replace('.', '_')}_baostock.csv")
         save(em.assign(symbol=symbol), DATA / f"a_{symbol.replace('.', '_')}_eastmoney.csv")
         save(sn.assign(symbol=symbol), DATA / f"a_{symbol.replace('.', '_')}_sina.csv")
         save(yh.assign(symbol=symbol), DATA / f"a_{symbol.replace('.', '_')}_yahoo.csv")
 
-        primary = sn if not sn.empty else (em if not em.empty else yh)
+        primary = bs if not bs.empty else (sn if not sn.empty else (em if not em.empty else yh))
+        source = "baostock" if not bs.empty else ("sina" if not sn.empty else ("eastmoney" if not em.empty else "yahoo"))
         daily, summary = validate_a_share(primary, symbol)
         if not summary.empty:
-            summary["primary_source"] = "sina" if not sn.empty else ("eastmoney" if not em.empty else "yahoo")
+            summary["primary_source"] = source
         save(daily, RESULTS / f"daily_{symbol.replace('.', '_')}.csv")
         summaries.append(summary)
-        if not sn.empty and not yh.empty:
-            c = compare_sources(sn, yh, symbol); c["pair"] = "sina-yahoo"; comparisons.append(c)
-        elif not em.empty and not sn.empty:
-            c = compare_sources(em, sn, symbol); c["pair"] = "eastmoney-sina"; comparisons.append(c)
+        if not bs.empty and not sn.empty:
+            c = compare_sources(bs, sn, symbol); c["pair"] = "baostock-sina"; comparisons.append(c)
+        elif not bs.empty and not yh.empty:
+            c = compare_sources(bs, yh, symbol); c["pair"] = "baostock-yahoo"; comparisons.append(c)
 
     for ticker, name in OVERSEAS.items():
-        x = safe(lambda: fetch_yahoo_5m(ticker, START_DATE, END_DATE), f"overseas {ticker}")
+        x = safe(lambda: fetch_yahoo_recent_5m(ticker, START_DATE, END_DATE), f"overseas {ticker}")
         if not x.empty:
             x["symbol"], x["name"] = ticker, name
         save(x, DATA / ("o_" + ticker.replace("^", "IDX_").replace("=", "_").replace(".", "_") + ".csv"))
@@ -78,8 +78,9 @@ def main():
     print(sm.to_string(index=False) if not sm.empty else "none")
     print("SOURCE_COMPARE")
     print(cp.to_string(index=False) if not cp.empty else "none")
-    if sm.empty or (sm.completeness < 0.90).any():
-        raise SystemExit("A-share primary data completeness below 90%")
+    valid = sm[sm["symbol"] != "000001.SH"] if not sm.empty and "symbol" in sm else pd.DataFrame()
+    if valid.empty or "completeness" not in valid or (valid.completeness < 0.95).any():
+        raise SystemExit("A-share stock primary data completeness below 95%")
 
 
 if __name__ == "__main__":
