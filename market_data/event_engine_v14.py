@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import numpy as np
 import pandas as pd
 
 import backtest_v13 as v13
@@ -111,15 +112,41 @@ def build_events(x):
 def metrics(a):
     if a.empty:
         return {
-            "events": 0, "win_15m_1pct": None, "win_30m_1_5pct": None,
-            "median_mfe_30m": None, "median_mae_30m": None,
+            "events": 0,
+            "win_15m_1pct": None,
+            "win_30m_1_5pct": None,
+            "win_30m_0_75atr": None,
+            "win_30m_1atr": None,
+            "directional_edge_mfe_gt_mae": None,
+            "median_mfe_30m": None,
+            "median_mae_30m": None,
+            "median_mfe_atr": None,
+            "median_mae_atr": None,
+            "median_mfe_mae_ratio": None,
         }
+
+    z = a.copy()
+    valid_atr = z.atr_pct.notna() & np.isfinite(z.atr_pct) & (z.atr_pct > 0)
+    za = z.loc[valid_atr].copy()
+    if not za.empty:
+        za["mfe_atr"] = za.mfe_30m / za.atr_pct
+        za["mae_atr"] = za.mae_30m / za.atr_pct
+        denom = za.mae_30m.where(za.mae_30m > 1e-9, np.nan)
+        za["mfe_mae_ratio"] = za.mfe_30m / denom
     return {
-        "events": int(len(a)),
-        "win_15m_1pct": float((a.future_15m >= .01).mean()),
-        "win_30m_1_5pct": float((a.future_30m >= .015).mean()),
-        "median_mfe_30m": float(a.mfe_30m.median()),
-        "median_mae_30m": float(a.mae_30m.median()),
+        "events": int(len(z)),
+        # Fixed-percentage metrics are retained for direct comparison with older runs.
+        "win_15m_1pct": float((z.future_15m >= .01).mean()),
+        "win_30m_1_5pct": float((z.future_30m >= .015).mean()),
+        # Regime-normalized metrics use ATR known at the signal time.
+        "win_30m_0_75atr": float((za.mfe_30m >= .75 * za.atr_pct).mean()) if len(za) else None,
+        "win_30m_1atr": float((za.mfe_30m >= za.atr_pct).mean()) if len(za) else None,
+        "directional_edge_mfe_gt_mae": float((z.mfe_30m > z.mae_30m).mean()),
+        "median_mfe_30m": float(z.mfe_30m.median()),
+        "median_mae_30m": float(z.mae_30m.median()),
+        "median_mfe_atr": float(za.mfe_atr.median()) if len(za) else None,
+        "median_mae_atr": float(za.mae_atr.median()) if len(za) else None,
+        "median_mfe_mae_ratio": float(za.mfe_mae_ratio.median()) if len(za) else None,
     }
 
 
@@ -135,6 +162,12 @@ def summarize(x, events):
             "grace_false_bars": GRACE_FALSE_BARS,
             "high_action": "WATCH_START",
             "low_action": "STRUCTURE_CONFIRM_CLOSE_ABOVE_PREV_HIGH",
+        },
+        "evaluation": {
+            "fixed_targets": "legacy 1.0%/15m and 1.5%/30m",
+            "adaptive_targets": "0.75x and 1.0x signal-time ATR",
+            "directional_edge": "30m MFE > 30m MAE",
+            "note": "ATR is computed only from bars available before the signal; future bars are used only for scoring.",
         },
         "trading_days": days,
         "HIGH": {
