@@ -7,7 +7,7 @@ DATA = Path(__file__).resolve().parent / "data"
 
 def load_a_cloud(symbol, source=None):
     key = symbol.replace('.', '_')
-    for src in ["baostock", "sina", "eastmoney", "yahoo"]:
+    for src in ["mootdx", "baostock", "sina", "eastmoney", "yahoo"]:
         p = DATA / f"a_{key}_{src}.csv"
         if not p.exists():
             continue
