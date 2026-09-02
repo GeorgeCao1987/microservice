@@ -31,6 +31,26 @@ jobs:
       - name: Collect May-June A-share history and macro context
         working-directory: market_data
         run: python run_pipeline.py
+      - name: Require exact 39-session OOS coverage
+        working-directory: market_data
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          from pathlib import Path
+          from validate import validate_a_share
+
+          symbols = ['002916','002463','600183','002938','603228','300476','000001.SH']
+          for symbol in symbols:
+              p = Path('data') / f"a_{symbol.replace('.', '_')}_mootdx.csv"
+              if not p.exists():
+                  raise SystemExit(f'missing OOS file: {p}')
+              x = pd.read_csv(p)
+              _, sm = validate_a_share(x, symbol)
+              r = sm.iloc[0]
+              print(symbol, r.to_dict())
+              if int(r['expected_days']) != 39 or int(r['days']) != 39 or int(r['bars']) != 1872 or float(r['completeness']) != 1.0:
+                  raise SystemExit(f'OOS coverage not exact for {symbol}')
+          PY
       - name: Collect historical news without blocking price replay
         working-directory: market_data
         run: python news_collector.py
