@@ -15,7 +15,7 @@ def _tdx_frame(df, source="mootdx"):
     vol_col="vol" if "vol" in x.columns else ("volume" if "volume" in x.columns else None); amt_col="amount" if "amount" in x.columns else None
     out=pd.DataFrame({"ts":pd.to_datetime(x[dt_col],errors="coerce"),"open":pd.to_numeric(x["open"],errors="coerce"),"high":pd.to_numeric(x["high"],errors="coerce"),"low":pd.to_numeric(x["low"],errors="coerce"),"close":pd.to_numeric(x["close"],errors="coerce"),"volume":pd.to_numeric(x[vol_col],errors="coerce") if vol_col else 0,"amount":pd.to_numeric(x[amt_col],errors="coerce") if amt_col else None,"source":source})
     return out.dropna(subset=["ts","close"])
-def fetch_mootdx_5m(symbol,start,end,is_index=False,pages=5):
+def fetch_mootdx_5m(symbol,start,end,is_index=False,pages=7):
     from mootdx.quotes import Quotes
     from mootdx.consts import MARKET_SH, MARKET_SZ
     code=symbol[-6:]; market=MARKET_SH if symbol.startswith("sh") or code.startswith(("5","6","9")) else MARKET_SZ
