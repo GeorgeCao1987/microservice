@@ -8,6 +8,8 @@ on:
       - 'market_data/backtest_v13_cloud.py'
       - 'market_data/backtest_v14.py'
       - 'market_data/backtest_v14_cloud.py'
+      - 'market_data/event_engine_v14.py'
+      - 'market_data/event_engine_v14_cloud.py'
       - '.github/workflows/model-replay-v14.yml'
   workflow_dispatch:
 
@@ -58,7 +60,7 @@ jobs:
               if not p.exists():
                   raise SystemExit(f'missing validated snapshot file: {p}')
               x = pd.read_csv(p)
-              daily, summary = validate_a_share(x, symbol)
+              _, summary = validate_a_share(x, symbol)
               r = summary.iloc[0]
               if int(r['days']) != 44 or int(r['bars']) != 2112 or float(r['completeness']) < 0.9999:
                   raise SystemExit(f'snapshot validation failed for {symbol}: {r.to_dict()}')
@@ -70,6 +72,9 @@ jobs:
       - name: Run V1.4 two-tier replay
         working-directory: market_data
         run: python backtest_v14_cloud.py
+      - name: Run asymmetric event state machine
+        working-directory: market_data
+        run: python event_engine_v14_cloud.py
       - name: Upload replay results
         if: always()
         uses: actions/upload-artifact@v4
@@ -80,5 +85,7 @@ jobs:
             market_data/results/candidates_v13.csv
             market_data/results/summary_v14.json
             market_data/results/signals_v14.csv
+            market_data/results/summary_events_v14.json
+            market_data/results/events_v14.csv
           if-no-files-found: warn
           retention-days: 30
