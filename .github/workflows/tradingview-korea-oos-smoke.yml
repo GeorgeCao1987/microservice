@@ -19,7 +19,7 @@ jobs:
         run: |
           npm init -y >/dev/null 2>&1
           npm install @ch99q/twc ws >/dev/null 2>&1
-          cat > /tmp/tv.mjs <<'JS'
+          cat > tv-smoke.mjs <<'JS'
           import { createSession, createChart, createSeries } from '@ch99q/twc';
           const start = Math.floor(Date.parse('2026-05-01T00:00:00+09:00')/1000);
           const end = Math.floor(Date.parse('2026-07-01T00:00:00+09:00')/1000);
@@ -54,4 +54,4 @@ jobs:
             await session.close();
           }
           JS
-          node /tmp/tv.mjs
+          node ./tv-smoke.mjs
