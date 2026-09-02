@@ -1,24 +1,24 @@
-name: market-data-v13
+name: market-data-snapshot
 
 on:
   push:
     branches: [ market-data-v13 ]
     paths:
-      - 'market_data/**'
-      - '.github/workflows/market-data-v13.yml'
-  pull_request:
-    branches: [ master ]
-    paths:
-      - 'market_data/**'
+      - 'market_data/config.py'
+      - 'market_data/collectors.py'
+      - 'market_data/validate.py'
+      - 'market_data/run_pipeline.py'
+      - 'market_data/news_collector.py'
+      - 'market_data/requirements.txt'
       - '.github/workflows/market-data-v13.yml'
   workflow_dispatch:
 
 concurrency:
-  group: market-data-v13-${{ github.ref }}
+  group: market-data-snapshot-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  backfill-validate-backtest:
+  collect-and-validate:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -30,26 +30,21 @@ jobs:
           cache-dependency-path: market_data/requirements.txt
       - name: Install dependencies
         run: pip install -r market_data/requirements.txt
-      - name: Collect A-share and overseas 5m history
+      - name: Collect and strictly validate market history
         working-directory: market_data
         run: python run_pipeline.py
       - name: Collect timestamped historical news
         working-directory: market_data
         run: python news_collector.py
         continue-on-error: true
-      - name: Run strict no-lookahead V1.3 replay
-        working-directory: market_data
-        run: python backtest_v13_cloud.py
-      - name: Run strict no-lookahead V1.4 replay
-        working-directory: market_data
-        run: python backtest_v14_cloud.py
-      - name: Upload data and validation results
+      - name: Upload validated snapshot
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: market-data-v14-${{ github.run_id }}
+          name: validated-market-snapshot-20260701-20260831-${{ github.run_id }}
           path: |
             market_data/data/
-            market_data/results/
+            market_data/results/completeness.csv
+            market_data/results/source_compare.csv
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 90
