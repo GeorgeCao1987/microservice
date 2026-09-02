@@ -3,18 +3,18 @@ import pandas as pd
 import requests
 
 HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn/"}
-
 def _to_dt(s): return pd.to_datetime(s, errors="coerce")
-
 def _tdx_frame(df, source="mootdx"):
     if df is None or len(df)==0: return pd.DataFrame()
-    x=df.reset_index() if getattr(df.index,"name",None) in ("datetime","date") else df.copy()
-    dt_col="datetime" if "datetime" in x.columns else ("date" if "date" in x.columns else None)
-    if dt_col is None: return pd.DataFrame()
+    x=df.copy()
+    if "datetime" in x.columns: dt_col="datetime"
+    elif "date" in x.columns: dt_col="date"
+    elif getattr(x.index,"name",None) in ("datetime","date"):
+        x=x.reset_index(); dt_col=x.columns[0]
+    else: return pd.DataFrame()
     vol_col="vol" if "vol" in x.columns else ("volume" if "volume" in x.columns else None); amt_col="amount" if "amount" in x.columns else None
     out=pd.DataFrame({"ts":pd.to_datetime(x[dt_col],errors="coerce"),"open":pd.to_numeric(x["open"],errors="coerce"),"high":pd.to_numeric(x["high"],errors="coerce"),"low":pd.to_numeric(x["low"],errors="coerce"),"close":pd.to_numeric(x["close"],errors="coerce"),"volume":pd.to_numeric(x[vol_col],errors="coerce") if vol_col else 0,"amount":pd.to_numeric(x[amt_col],errors="coerce") if amt_col else None,"source":source})
     return out.dropna(subset=["ts","close"])
-
 def fetch_mootdx_5m(symbol,start,end,is_index=False,pages=5):
     from mootdx.quotes import Quotes
     from mootdx.consts import MARKET_SH, MARKET_SZ
@@ -38,7 +38,6 @@ def fetch_mootdx_5m(symbol,start,end,is_index=False,pages=5):
             try: client.close()
             except Exception: pass
         socket.setdefaulttimeout(old)
-
 def fetch_baostock_5m(symbol,start,end):
     import baostock as bs
     market="sh" if symbol.startswith("sh") else "sz"; code=symbol[-6:]; bs_code=f"{market}.{code}"; old=socket.getdefaulttimeout(); socket.setdefaulttimeout(10)
@@ -56,7 +55,6 @@ def fetch_baostock_5m(symbol,start,end):
             return pd.DataFrame(rows)
         finally: bs.logout()
     finally: socket.setdefaulttimeout(old)
-
 def fetch_eastmoney_5m(secid,start,end):
     url="https://push2his.eastmoney.com/api/qt/stock/kline/get"; params={"secid":secid,"klt":5,"fqt":1,"beg":start.replace("-",""),"end":end.replace("-",""),"lmt":100000,"fields1":"f1,f2,f3,f4,f5,f6","fields2":"f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61"}
     r=requests.get(url,params=params,headers=HEADERS,timeout=10); r.raise_for_status(); rows=[]
@@ -64,12 +62,10 @@ def fetch_eastmoney_5m(secid,start,end):
         p=v.split(",")
         if len(p)>=7: rows.append({"ts":_to_dt(p[0]),"open":float(p[1]),"close":float(p[2]),"high":float(p[3]),"low":float(p[4]),"volume":float(p[5]),"amount":float(p[6]),"source":"eastmoney"})
     return pd.DataFrame(rows)
-
 def fetch_sina_5m(symbol,count=1023):
     url="https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData"; params={"symbol":symbol,"scale":5,"ma":"no","datalen":min(count,1023)}; r=requests.get(url,params=params,headers=HEADERS,timeout=10); r.raise_for_status(); arr=r.json(); rows=[]
     for p in arr if isinstance(arr,list) else []: rows.append({"ts":_to_dt(p.get("day")),"open":float(p.get("open",0)),"close":float(p.get("close",0)),"high":float(p.get("high",0)),"low":float(p.get("low",0)),"volume":float(p.get("volume",0)),"amount":None,"source":"sina"})
     return pd.DataFrame(rows)
-
 def _fetch_yahoo(ticker,start,end,interval):
     p1=int(pd.Timestamp(start,tz="UTC").timestamp()); p2=int((pd.Timestamp(end,tz="UTC")+pd.Timedelta(days=1)).timestamp()); url=f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"; params={"period1":p1,"period2":p2,"interval":interval,"includePrePost":"false","events":"div,splits"}; r=requests.get(url,params=params,headers=HEADERS,timeout=10); r.raise_for_status(); result=((r.json().get("chart") or {}).get("result") or [])
     if not result: return pd.DataFrame()
