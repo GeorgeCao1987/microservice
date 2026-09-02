@@ -4,9 +4,10 @@ import pandas as pd
 
 from config import A_SHARES, START_DATE, END_DATE, OVERSEAS
 from collectors import (
-    fetch_baostock_5m, fetch_mootdx_5m, fetch_sina_5m,
+    fetch_mootdx_5m, fetch_sina_5m,
     fetch_yahoo_recent_5m, fetch_yahoo_daily,
 )
+from baostock_batch import fetch_baostock_batch
 from validate import validate_a_share, compare_sources
 
 BASE = Path(__file__).resolve().parent
@@ -65,15 +66,21 @@ def main():
     summaries = []
     comparisons = []
 
-    for symbol, cfg in A_SHARES.items():
-        # Historical backtest source: Baostock first. It does not depend on a
-        # TDX quote node and is suitable for older 5m windows.
-        bs = trim(safe(
-            lambda: fetch_baostock_5m(cfg["sina"], START_DATE, END_DATE),
-            f"baostock {symbol}", attempts=2, require_nonempty=True,
-        ))
+    # One Baostock login for all seven histories. If the login itself fails,
+    # fallbacks remain available on a per-symbol basis.
+    try:
+        bs_map = fetch_baostock_batch(
+            {symbol: cfg["sina"] for symbol, cfg in A_SHARES.items()},
+            START_DATE, END_DATE,
+        )
+    except Exception as e:
+        print("BAOSTOCK_BATCH_LOGIN_FAILED", repr(e))
+        bs_map = {symbol: pd.DataFrame() for symbol in A_SHARES}
 
-        # Only fall back to mootdx when Baostock is not sufficiently complete.
+    for symbol, cfg in A_SHARES.items():
+        bs = trim(bs_map.get(symbol, pd.DataFrame()))
+
+        # Only fall back to TDX when Baostock is not sufficiently complete.
         td = pd.DataFrame()
         if not complete_enough(bs, symbol):
             td = trim(safe(
@@ -84,7 +91,7 @@ def main():
                 f"mootdx {symbol}", attempts=2, require_nonempty=True,
             ))
 
-        # Sina remains a recent-history cross-check, not a historical backtest fallback.
+        # Sina is a recent-history verifier, never an older-history backtest fallback.
         sn = trim(safe(lambda: fetch_sina_5m(cfg["sina"], 1023), f"sina {symbol}"))
         if not sn.empty and ("amount" not in sn.columns or sn.amount.isna().all()):
             sn["amount"] = sn.close * sn.volume
