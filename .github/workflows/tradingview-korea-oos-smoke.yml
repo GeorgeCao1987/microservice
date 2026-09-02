@@ -1,0 +1,57 @@
+name: tradingview-korea-oos-smoke
+
+on:
+  push:
+    branches: [ market-data-v13 ]
+    paths:
+      - '.github/workflows/tradingview-korea-oos-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Probe TradingView KRX 5m historical range
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm install @ch99q/twc ws >/dev/null 2>&1
+          cat > /tmp/tv.mjs <<'JS'
+          import { createSession, createChart, createSeries } from '@ch99q/twc';
+          const start = Math.floor(Date.parse('2026-05-01T00:00:00+09:00')/1000);
+          const end = Math.floor(Date.parse('2026-07-01T00:00:00+09:00')/1000);
+          const tests = [
+            ['005930','KRX','Samsung'],
+            ['000660','KRX','SKHynix'],
+            ['KOSPI','KRX','KOSPI'],
+          ];
+          const session = await createSession();
+          try {
+            for (const [symbol, exchange, name] of tests) {
+              const chart = await createChart(session);
+              try {
+                const resolved = await chart.resolve(symbol, exchange);
+                console.log('RESOLVED', name, resolved?.name || resolved?.description || symbol);
+                const series = await createSeries(session, chart, resolved, '5', 0, [start,end]);
+                const hist = series.history || [];
+                console.log('HISTORY', name, hist.length);
+                if (hist.length) {
+                  const ts = hist.map(x => Array.isArray(x) ? x[0] : (x.time ?? x.timestamp ?? x[0]));
+                  console.log('RANGE', name, new Date(Math.min(...ts)*1000).toISOString(), new Date(Math.max(...ts)*1000).toISOString());
+                  console.log('FIRST', JSON.stringify(hist[0]));
+                  console.log('LAST', JSON.stringify(hist[hist.length-1]));
+                }
+                await series.close();
+              } catch (e) {
+                console.log('FAIL',name,e?.stack || String(e));
+              }
+              try { await chart.close(); } catch {}
+            }
+          } finally {
+            await session.close();
+          }
+          JS
+          node /tmp/tv.mjs
