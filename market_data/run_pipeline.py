@@ -36,11 +36,15 @@ def main():
                 x["ts"] = pd.to_datetime(x.ts)
         if not sn.empty:
             sn = sn[(sn.ts >= pd.Timestamp(START_DATE)) & (sn.ts < pd.Timestamp(END_DATE) + pd.Timedelta(days=1))]
+            # Sina has volume but no turnover amount. Use close*volume only as a within-symbol efficiency proxy.
+            if "amount" not in sn.columns or sn["amount"].isna().all():
+                sn["amount"] = sn["close"] * sn["volume"]
         if not yh.empty:
-            # Yahoo timestamps are UTC-aware; convert to Shanghai and strip tz for A-share joins.
             if getattr(yh.ts.dt, "tz", None) is not None:
                 yh["ts"] = yh.ts.dt.tz_convert("Asia/Shanghai").dt.tz_localize(None)
             yh = yh[(yh.ts >= pd.Timestamp(START_DATE)) & (yh.ts < pd.Timestamp(END_DATE) + pd.Timedelta(days=1))]
+            if "amount" not in yh.columns or yh["amount"].isna().all():
+                yh["amount"] = yh["close"] * yh["volume"]
 
         save(em.assign(symbol=symbol), DATA / f"a_{symbol.replace('.', '_')}_eastmoney.csv")
         save(sn.assign(symbol=symbol), DATA / f"a_{symbol.replace('.', '_')}_sina.csv")
