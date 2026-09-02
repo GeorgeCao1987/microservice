@@ -97,8 +97,18 @@ def main():
     print(sm.to_string(index=False) if not sm.empty else "none")
     print("SOURCE_COMPARE")
     print(cp.to_string(index=False) if not cp.empty else "none")
-    if sm.empty or "completeness" not in sm or (sm.completeness < .95).any():
-        raise SystemExit("A-share/index primary data completeness below 95%")
+
+    if sm.empty or "completeness" not in sm:
+        raise SystemExit("missing completeness report")
+    bad = sm[
+        (sm["completeness"] < .999) |
+        (sm["missing_days"] > 0) |
+        (sm["incomplete_days"] > 0)
+    ]
+    if not bad.empty:
+        print("STRICT_COMPLETENESS_FAILURE")
+        print(bad.to_string(index=False))
+        raise SystemExit("A-share/index data not sufficiently complete for backtest")
 
 
 if __name__ == "__main__":
