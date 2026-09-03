@@ -59,16 +59,26 @@ def normalize_tdx(df, source):
     }).dropna(subset=["ts", "close"])
 
 
+def expected_shape(df, symbol):
+    if df is None or df.empty:
+        return None, None
+    _, sm = validate_a_share(df, symbol)
+    r = sm.iloc[0]
+    return r, sm
+
+
 def is_exact(df, symbol):
     if df is None or df.empty:
         return False
     try:
-        _, sm = validate_a_share(df, symbol)
-        r = sm.iloc[0]
+        r, _ = expected_shape(df, symbol)
+        expected_days = int(r["expected_days"])
+        expected_bars = expected_days * 48
         return bool(
-            int(r["expected_days"]) == 39 and
-            int(r["days"]) == 39 and
-            int(r["bars"]) == 1872 and
+            expected_days > 0 and
+            int(r["days"]) == expected_days and
+            int(r["bars"]) == expected_bars and
+            int(r["complete_days"]) == expected_days and
             int(r["missing_days"]) == 0 and
             int(r["incomplete_days"]) == 0 and
             float(r["completeness"]) == 1.0
@@ -104,7 +114,7 @@ def fetch_pytdx_history(symbol, is_index=False):
             print(f"{kind}_SERVER_OK", symbol, ip, port,
                   "range", tdf.iloc[0]["datetime"], tdf.iloc[-1]["datetime"])
             parts = []
-            for page in range(10):
+            for page in range(16):
                 rows = getter(0, market, code, page * 800, 800) or []
                 if not rows:
                     break
@@ -132,15 +142,14 @@ def fetch_pytdx_history(symbol, is_index=False):
                 except Exception:
                     pass
 
-    raise RuntimeError(f"no TDX server returned exact 39x48 history for {symbol}")
+    raise RuntimeError(f"no TDX server returned exact history for {symbol} in {START_DATE}..{END_DATE}")
 
 
 def assert_exact(df, symbol):
-    _, sm = validate_a_share(df, symbol)
-    r = sm.iloc[0]
+    r, sm = expected_shape(df, symbol)
     print("CORE_CHECK", symbol, r.to_dict())
     if not is_exact(df, symbol):
-        raise RuntimeError(f"{symbol} is not exact 39x48")
+        raise RuntimeError(f"{symbol} failed exact session x 48 validation")
     return sm
 
 
@@ -162,7 +171,7 @@ def main():
 
     report = pd.concat(summaries, ignore_index=True)
     report.to_csv(RESULTS / "completeness.csv", index=False)
-    print("CORE_OOS_DATA_EXACT_OK")
+    print("CORE_DATA_EXACT_OK", START_DATE, END_DATE)
     print(report.to_string(index=False))
 
 
